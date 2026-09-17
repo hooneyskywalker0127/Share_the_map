@@ -36,7 +36,7 @@ exec(open(p).read())
 
 ![두 홀](docs/shot_both_halls.png)
 
-통로에서 본 모습. 문설주를 지나면 바로 옆 홀입니다.
+통로에서 본 모습. 문 양옆 기둥을 지나면 바로 옆 홀입니다.
 
 ![통로](docs/shot_passage.png)
 
@@ -105,7 +105,7 @@ python build_twin_hall_map.py -o twin_hall_map.usd
 |---|---|
 | `/World/TwinHall/Hall_A` | 홀 본체 |
 | `/World/TwinHall/Hall_B` | Hall_A를 X로 +26.30 m 옮긴 복사본. 배치는 아래대로 다릅니다 |
-| `/World/TwinHall/Junction` | 공유 벽(통로 위아래 두 구간) + 문설주 + 바닥 표시 |
+| `/World/TwinHall/Junction` | 공유 벽(통로 위아래 두 구간) + 문 양옆 기둥 + 바닥 표시 |
 | `/World/TwinHall/PhysicsScene` | 중력 −Z 9.81 |
 | `/World/TwinHall/Dome` | 앰비언트 돔 라이트 |
 
