@@ -10,6 +10,24 @@
 
 위 이미지를 누르면 YouTube에서 재생됩니다 — https://youtu.be/JdJChk__7Is
 
+### 화면
+
+전체 배치. 왼쪽이 Hall A, 오른쪽이 Hall B이고 가운데 벽에 통로가 뚫려 있습니다.
+
+![전체 배치](docs/shot_overview.png)
+
+![두 홀](docs/shot_both_halls.png)
+
+통로에서 본 모습. 문설주를 지나면 바로 옆 홀입니다.
+
+![통로](docs/shot_passage.png)
+
+홀 내부와 창고 구역.
+
+![홀 내부](docs/shot_hall_interior.png)
+
+![창고 구역](docs/shot_storage.png)
+
 같은 크기의 창고 홀 두 개를 X 방향으로 이어붙이고, 맞닿은 벽 가운데를 폭 5 m로
 뚫어 통로를 낸 Isaac Sim 맵입니다. 로봇은 들어 있지 않습니다. 이동 로봇을 직접
 스폰해서 쓰시면 됩니다.
