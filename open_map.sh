@@ -11,6 +11,16 @@ from isaacsim import SimulationApp
 app = SimulationApp({"headless": False,
                      "open_usd": sys.argv[1],
                      "create_new_stage": False})
+# the Script Editor is not part of the experience SimulationApp starts, so switch it on
+# here - otherwise Window > Script Editor simply is not in the menu
+try:
+    import omni.kit.app
+    omni.kit.app.get_app().get_extension_manager().set_extension_enabled_immediate(
+        "omni.kit.window.script_editor", True)
+    print("[open_map] script editor enabled (Window > Script Editor)")
+except Exception as exc:
+    print("[open_map] could not enable the script editor:", exc)
+
 import omni.usd
 ctx = omni.usd.get_context()
 for _ in range(600):                       # let the referenced props finish streaming in

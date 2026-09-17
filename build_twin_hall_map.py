@@ -72,7 +72,6 @@ JITTER_SEED     = 20260724  # fixed seed so the "messy" placement (crate stacks,
 RNG = random.Random(JITTER_SEED)
 
 # Isaac warehouse props (paths relative to the Isaac asset root)
-RACK_ASSET = "/Isaac/Environments/Simple_Warehouse/Props/SM_RackPile_03.usd"
 PALLET     = "/Isaac/Props/Pallet/pallet.usd"
 BOXA = "/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxA_01.usd"
 BOXB = "/Isaac/Environments/Simple_Warehouse/Props/SM_CardBoxB_01.usd"
@@ -263,6 +262,8 @@ MAT = {
     "panel":    color_mat("panel",    (1.0, 1.0, 1.0), rough=0.9, emissive=(1.4, 1.42, 1.5)),  # light panel
     "armjoint": color_mat("armjoint", (0.22, 0.23, 0.26), rough=0.4, metallic=0.5),   # dark joints
     "crate":    color_mat("crate",    (0.74, 0.58, 0.36), rough=0.7),                 # cardboard crate
+    "tote":     color_mat("tote",     (0.20, 0.34, 0.52), rough=0.45),                # blue plastic crate
+    "totealt":  color_mat("totealt",  (0.38, 0.42, 0.46), rough=0.45),                # grey plastic crate
     "cratealt": color_mat("cratealt", (0.60, 0.47, 0.30), rough=0.7),                 # darker crate
     "slred":    color_mat("slred",    (0.85, 0.10, 0.10), rough=0.4, emissive=(0.9, 0.05, 0.05)),  # stack light
     "slamber":  color_mat("slamber",  (0.95, 0.70, 0.10), rough=0.4, emissive=(0.9, 0.55, 0.05)),
@@ -352,6 +353,86 @@ def crate_stack(prefix, x, y, levels, size=(0.52, 0.42, 0.34)):
         jr = RNG.uniform(-6.0, 6.0)
         c = box("%s_%d" % (prefix, k), size, (jx, jy, z), MAT[mats[k % 2]], phys="dynamic", mass=1.5, rotz=jr)
         add_semantic(c.GetPrim(), "crate")
+
+
+def plastic_crate(prefix, x, y, z, mat, w=0.5, d=0.38, h=0.3, rotz=0.0):
+    # An open-top plastic crate: a floor plus four thin walls, authored as flat sibling
+    # prims (no wrapper Xform). randomize_map.py keeps the walls together by name.
+    t = 0.022
+    ca, sa = math.cos(math.radians(rotz)), math.sin(math.radians(rotz))
+
+    def put(nm, size, lx, ly, lz):
+        box(prefix + "_" + nm, size, (x + lx * ca - ly * sa, y + lx * sa + ly * ca, z + lz),
+            mat, phys="static", rotz=rotz)
+
+    put("base",  (w, d, t), 0.0, 0.0, t / 2.0)
+    put("wallN", (w, t, h), 0.0,  d / 2.0 - t / 2.0, h / 2.0)
+    put("wallS", (w, t, h), 0.0, -d / 2.0 + t / 2.0, h / 2.0)
+    put("wallE", (t, d, h),  w / 2.0 - t / 2.0, 0.0, h / 2.0)
+    put("wallW", (t, d, h), -w / 2.0 + t / 2.0, 0.0, h / 2.0)
+
+
+def pallet_rack(prefix, x, y, bays=2, levels=3, axis="y", bay_w=2.1, depth=1.1, lift=1.0):
+    # A real standing pallet rack, built from primitives: uprights at every bay boundary,
+    # a pair of beams and a deck plate per level. Built here rather than referenced from the
+    # warehouse asset library because the deck heights have to be known to stack cargo on
+    # them (and because a primitive rack loads with no asset server).
+    run = bays * bay_w
+    post_h = levels * lift + 0.62   # uprights stand clear of the top pallet
+
+    def place(along, across, z, size_along, size_across, size_z, mat, phys=None):
+        # 'along' runs down the rack, 'across' is its depth
+        if axis == "y":
+            box(prefix + "_%s" % place.tag, (size_across, size_along, size_z),
+                (x + across, y + along, z), mat, phys=phys)
+        else:
+            box(prefix + "_%s" % place.tag, (size_along, size_across, size_z),
+                (x + along, y + across, z), mat, phys=phys)
+
+    for i in range(bays + 1):                                   # uprights
+        a = -run / 2.0 + i * bay_w
+        for e, c in enumerate((-depth / 2.0 + 0.06, depth / 2.0 - 0.06)):
+            place.tag = "post%d_%d" % (i, e)
+            place(a, c, post_h / 2.0, 0.09, 0.09, post_h, MAT["shelf"], phys="static")
+    for k in range(levels):                                     # beams + deck per level
+        z = (k + 1) * lift
+        for e, c in enumerate((-depth / 2.0 + 0.06, depth / 2.0 - 0.06)):
+            place.tag = "beam%d_%d" % (k, e)
+            place(0.0, c, z, run, 0.10, 0.12, MAT["rail"])
+        place.tag = "deck%d" % k
+        place(0.0, 0.0, z - 0.03, run - 0.02, depth - 0.16, 0.04, MAT["shelf"], phys="static")
+    return run, post_h
+
+
+def rack_cargo(prefix, x, y, bays=2, levels=3, axis="y", bay_w=2.1, lift=1.0, seed_shift=0):
+    # pallets of boxes and plastic crates sitting on the rack decks and on the floor under
+    # them. Static: cargo that is meant to stay put on a shelf, not to be pushed around.
+    run = bays * bay_w
+    carton = ("goodsbox", "crate", "goodsalt", "cratealt")
+    plastic = ("tote", "totealt")
+    for k in range(levels + 1):                                 # level 0 = the floor bay
+        z0 = 0.0 if k == 0 else k * lift + 0.02
+        for b in range(bays):
+            if (b + k + seed_shift) % 4 == 3:                   # leave the odd bay empty
+                continue
+            a = -run / 2.0 + (b + 0.5) * bay_w
+            for j in range(2):
+                da = (j - 0.5) * 0.80 + RNG.uniform(-0.04, 0.04)
+                jitter = RNG.uniform(-0.04, 0.04)
+                rz = RNG.uniform(-4.0, 4.0)
+                name = "%s_%d_%d_%d" % (prefix, k, b, j)
+                px = x + (jitter if axis == "y" else a + da)
+                py = y + (a + da if axis == "y" else jitter)
+                if (b + k + j + seed_shift) % 3 == 1:           # plastic crate
+                    m = MAT[plastic[(b + j + seed_shift) % 2]]
+                    w_, d_ = (0.38, 0.5) if axis == "y" else (0.5, 0.38)
+                    plastic_crate(name, px, py, z0, m, w=w_, d=d_, h=0.3, rotz=rz)
+                else:                                            # cardboard carton
+                    m = MAT[carton[(b + k + j + seed_shift) % 4]]
+                    h_ = RNG.choice((0.34, 0.42, 0.5))
+                    size = (0.52, 0.62, h_) if axis == "y" else (0.62, 0.52, h_)
+                    box(name, size, (px, py, z0 + h_ / 2.0), m, phys="static", rotz=rz)
+
 
 
 def tile_grid(prefix, cx_, cy_, w, d, top_z, spacing=1.4, line_w=0.03):
@@ -587,32 +668,37 @@ for i in range(n):
         (i * CELL_SPACING, aisle_cy - CORRIDOR_WIDTH / 2.0 + 0.3, 0.25), MAT["rail"], phys="static")
 
 # ---- crate stacks: real rigid bodies, stacked in storage and staged along the aisle ----
-crate_stack(ROOT + "/Storage/Stock0", store_x - 1.0, store_cy + 1.5, 3)
-crate_stack(ROOT + "/Storage/Stock1", store_x - 1.0, store_cy - 1.5, 2)
-crate_stack(ROOT + "/Storage/Stock2", store_x - 1.7, store_cy + 0.2, 2)
-crate_stack(ROOT + "/Storage/Stock3", store_x - 1.7, store_cy - 0.8, 3)
+crate_stack(ROOT + "/Storage/Stock0", store_x - 2.4, store_cy + 1.4, 3)
+crate_stack(ROOT + "/Storage/Stock1", store_x - 2.4, store_cy - 1.3, 2)
 crate_stack(ROOT + "/Storage/Stage0", 2.0, aisle_cy + 2.1, 2)         # staged, west end
 crate_stack(ROOT + "/Storage/Stage1", 11.0, aisle_cy - 2.1, 2)        # staged, east end
 
 # ---- loose finished units staged on the storage floor (rigid bodies, pickable) ----
 if USE_PRODUCTS:
-    finished = [(store_x - 0.5, store_cy + 1.2), (store_x - 0.2, store_cy + 0.5),
-                (store_x - 0.5, store_cy - 1.2), (aisle_left + 1.6, CELL_Y - 0.2)]
+    finished = [(store_x - 3.0, store_cy + 0.5), (store_x - 3.3, store_cy - 0.2),
+                (store_x - 3.0, store_cy - 0.9), (aisle_left + 1.6, CELL_Y - 0.2)]
     for k, (vx, vy) in enumerate(finished):
         vpath = ROOT + "/Products/Vac_%d" % k
         vroot = rigid_body_root(vpath, vx, vy, 0.0, mass=0.65)
         finished_unit(vpath)
         add_semantic(vroot.GetPrim(), "finished_unit")
 
-# ---- storage zone: floor + racks + pallets/boxes (primitives when assets are off) ----
+# ---- storage zone: floor + two back-to-back pallet rack rows, loaded with cargo ----
 box(ROOT + "/Storage/Floor", (store_w, store_d, 0.02), (store_x, store_cy, 0.011), MAT["storefl"])
-for j, sy in enumerate((-1.4, 0.0, 1.4)):
-    if ASSETS_ON:
-        add_ref(ROOT + "/Assets/Rack_%d" % j, RACK_ASSET, (store_x, store_cy + sy, 0.0))
-        add_semantic(stage.GetPrimAtPath(ROOT + "/Assets/Rack_%d" % j), "storage_rack")
-    else:
-        shelf_prim = box(ROOT + "/Storage/Shelf_%d" % j, (1.6, 1.1, 1.6), (store_x, store_cy + sy, 0.8), MAT["shelf"])
-        add_semantic(shelf_prim.GetPrim(), "storage_rack")
+for j, sx_ in enumerate((-1.0, 1.0)):
+    rp = ROOT + "/Storage/Rack_%d" % j
+    pallet_rack(rp, store_x + sx_, store_cy, bays=2, levels=3, axis="y")
+    add_semantic(stage.GetPrimAtPath(rp + "_post0_0"), "storage_rack")
+    rack_cargo(ROOT + "/Storage/RackLoad_%d" % j, store_x + sx_, store_cy,
+               bays=2, levels=3, axis="y", seed_shift=j)
+
+# a second rack stands in the far corner, away from the aisle and well clear of the passage
+corner_rack_x, corner_rack_y = gx1 - 4.0, gy0 + 0.95
+pallet_rack(ROOT + "/Storage/RackCorner", corner_rack_x, corner_rack_y,
+            bays=2, levels=3, axis="x")
+add_semantic(stage.GetPrimAtPath(ROOT + "/Storage/RackCorner_post0_0"), "storage_rack")
+rack_cargo(ROOT + "/Storage/RackCornerLoad", corner_rack_x, corner_rack_y,
+           bays=2, levels=3, axis="x", seed_shift=2)
 
 if ASSETS_ON:
     clutter = [
@@ -694,7 +780,7 @@ if USE_PICKZONE:
     add_semantic(g.GetPrim(), "goods_pouch")
     g = box(P + "/g_pch1", (0.26, 0.20, 0.06), (pick_x + 1.7, shelf_y - 0.04, 0.47),  MAT["pouchB"], phys="static", rotz=-20)
     add_semantic(g.GetPrim(), "goods_pouch")
-    g = box(P + "/g_box2", (0.28, 0.22, 0.18), (pick_x + 1.9, shelf_y + 0.02, 0.51),  MAT["goodsbox"], phys="static", rotz=6)
+    g = box(P + "/g_box2", (0.28, 0.22, 0.18), (pick_x + 2.3, shelf_y + 0.02, 0.51),  MAT["goodsbox"], phys="static", rotz=6)
     add_semantic(g.GetPrim(), "goods_box")
 
     # goods piled on the floor toward the aisle (north band) - some leaning/stacked/tipped
@@ -802,6 +888,67 @@ if stage.GetPrimAtPath(HALL_B):
     stage.RemovePrim(HALL_B)
 Sdf.CopySpec(_layer, Sdf.Path(ROOT), _layer, Sdf.Path(HALL_B))
 UsdGeom.Xformable(stage.GetPrimAtPath(HALL_B)).AddTranslateOp().Set(Gf.Vec3d(DX, 0.0, 0.0))
+
+# ---- Hall B: same hall, different layout ----
+# A pixel-identical copy next door reads as a copy, so Hall B gets its fixtures moved
+# around: the storage zone and the corner rack swap ends of the hall, the stalled unit
+# stands somewhere else in the aisle, and the loose clutter is shuffled. Nothing is moved
+# into the band the passage opens onto.
+def shift_prims(parent, name_prefix, dx=0.0, dy=0.0):
+    # Offsets every prim under `parent` whose name starts with `name_prefix`. Only the
+    # topmost translate op on each branch is touched - children below it are positioned
+    # relative to it (a compound rigid body, or a referenced prop under its wrapper).
+    parent_prim = stage.GetPrimAtPath(parent)
+    if not parent_prim:
+        return 0
+    moved = 0
+    stack = [c for c in parent_prim.GetChildren() if c.GetName().startswith(name_prefix)]
+    while stack:
+        prim = stack.pop()
+        ops = [op for op in UsdGeom.Xformable(prim).GetOrderedXformOps()
+               if op.GetOpType() == UsdGeom.XformOp.TypeTranslate]
+        if ops:
+            v = ops[0].Get()
+            ops[0].Set(Gf.Vec3d(v[0] + dx, v[1] + dy, v[2]))
+            moved += 1
+            continue
+        stack.extend(prim.GetChildren())
+    return moved
+
+
+# Hall B has no picking bay: the cluttered goods area is what made the two halls read as
+# the same room twice. Removing it leaves that corner as open floor, and the handover strip
+# that pointed into it goes with it. The pack zone stays.
+for _gone in (HALL_B + "/PickZone", HALL_B + "/Handover"):
+    if stage.GetPrimAtPath(_gone):
+        stage.RemovePrim(_gone)
+
+STORAGE_DY = -11.3          # storage zone: north-east corner -> south-east corner
+CORNER_DY  = 12.5           # corner rack: south wall -> north-east, where storage was
+for parent, prefix, dx_, dy_ in [
+    (HALL_B + "/Storage", "Floor",       0.0, STORAGE_DY),
+    (HALL_B + "/Storage", "Rack_",       0.0, STORAGE_DY),
+    (HALL_B + "/Storage", "RackLoad_",   0.0, STORAGE_DY),
+    (HALL_B + "/Storage", "Stock",       0.0, STORAGE_DY),
+    (HALL_B + "/Storage", "ApronN",      0.0, STORAGE_DY / 2.0),
+    (HALL_B + "/Products", "Vac_0",      0.0, STORAGE_DY),
+    (HALL_B + "/Products", "Vac_1",      0.0, STORAGE_DY),
+    (HALL_B + "/Products", "Vac_2",      0.0, STORAGE_DY),
+    (HALL_B + "/Storage", "RackCorner",  0.0, CORNER_DY),
+    (HALL_B + "/Obstacle", "StalledUnit", -6.0, 0.0),
+    (HALL_B + "/Markings", "Detour_",    -6.0, 0.0),
+    (HALL_B + "/Storage", "Stage0",       4.2, 0.0),
+    (HALL_B + "/Storage", "Stage1",      -3.6, 0.9),
+    (HALL_B + "/Assets",  "Extra_0",      6.4, 0.0),    # trolleys
+    (HALL_B + "/Assets",  "Extra_1",      4.8, -0.5),
+    (HALL_B + "/Assets",  "Extra_4",      2.5, 0.0),    # aisle signs
+    (HALL_B + "/Assets",  "Extra_6",      0.0, STORAGE_DY),   # storage crates
+    (HALL_B + "/Assets",  "Extra_7",      0.0, STORAGE_DY),
+    (HALL_B + "/Assets",  "Extra_8",      0.0, STORAGE_DY),
+    (HALL_B + "/Assets",  "Clutter_2",   -2.0, 0.6),
+    (HALL_B + "/Assets",  "Clutter_5",    1.6, -0.7),
+]:
+    shift_prims(parent, prefix, dx_, dy_)
 
 # ---- shared wall + passage ----
 # drop the two walls that now sit back to back on the seam, and build one wall in their place
